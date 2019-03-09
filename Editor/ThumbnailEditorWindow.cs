@@ -77,17 +77,17 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         EditorGUILayout.BeginHorizontal();
         {
-            if (GUILayout.Button("Refresh All"))
+            if (GUILayout.Button("Render All"))
             {
                 RenderPreviews(prefabObjects);
             }
-            if (GUILayout.Button("RefreshSelected"))
+            if (GUILayout.Button("Render Selected"))
             {
                 List<PrefabObject> selected = 
                     prefabObjects.Where(prefabObject => prefabObject.selected).ToList();
                 RenderPreviews(selected);
             }
-            if (GUILayout.Button("Save Data"))
+            if (GUILayout.Button("Save Json/Image Data"))
             {
                 //saving images and a json with the settings used to create it
                 foreach (PrefabObject meshObject in prefabObjects)
@@ -179,24 +179,30 @@ public partial class ThumbnailEditorWindow : EditorWindow
     {
         Camera cam = GetRenderCamera();
         cam.cullingMask = 1 << settings.renderLayer;
+        cam.fieldOfView = settings.cameraFOV;
 
         if (cam.targetTexture.height != settings.ThumbnailSize)
             cam.targetTexture = new RenderTexture(settings.ThumbnailSize, settings.ThumbnailSize, 32);
 
 
         var DefaultRenderData = GetCameraTransformTuple(settings.orbitYaw, settings.orbitPitch, settings.orbitDistance, settings.orbitHeight);
-        (Vector3 pos, Quaternion rot, Vector3 forward) activeData;
+        (Vector3 pos, Quaternion rot, Vector3 forward, Vector3 target) activeData;
 
         for (var moIndex = 0; moIndex < objects.Count; moIndex++)
         {
             PrefabObject prefabObject = objects[moIndex];
             //if it has custom render settings, set them
             if (prefabObject.hasCustomSettings)
-                activeData = GetCameraTransformTuple(prefabObject.orbitYaw, prefabObject.orbitPitch,
+            {
+                activeData = GetCameraTransformTuple(
+                    prefabObject.orbitYaw, 
+                    prefabObject.orbitPitch,
                     prefabObject.orbitDistance,
                     prefabObject.orbitHeight);
+            }
             else
                 activeData = DefaultRenderData;
+
 
             Matrix4x4 mtx = Matrix4x4.TRS(activeData.pos, activeData.rot, Vector3.one);
             //Matrix4x4 mtx = Matrix4x4.TRS(Vector3.zero , Quaternion.identity, Vector3.one);
@@ -229,11 +235,13 @@ public partial class ThumbnailEditorWindow : EditorWindow
             prefabObject.Thumbnail = texture;
 
             objects[moIndex] = prefabObject;
-            var pngData = texture.EncodeToPNG();
 
-            var imagePath = Path.Combine(settings.path, prefabObject.prefabObject.name + ".png");
+
+            //var pngData = texture.EncodeToPNG();
+
+            //var imagePath = Path.Combine(settings.path, prefabObject.prefabObject.name + ".png");
             // For testing purposes, also write to a file in the project folder
-            File.WriteAllBytes(imagePath, pngData);
+            //File.WriteAllBytes(imagePath, pngData);
 
             //AssetDatabase.CreateAsset(t, $"Assets/{levelTile.name}.png");
         }
@@ -304,7 +312,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
     }
 
 
-    private static (Vector3 pos, Quaternion rot, Vector3 forward) GetCameraTransformTuple(float yaw, float pitch, float distance, float height)
+    private static (Vector3 pos, Quaternion rot, Vector3 forward, Vector3 target) GetCameraTransformTuple(float yaw, float pitch, float distance, float height)
     {
         //where the camera will be pointing
         var targetPos = new Vector3(0, height, 0);
@@ -322,7 +330,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         var camPosition = camDelta + targetPos;
 
-        return (camPosition, lookRotation, -camDelta);
+        return (camPosition, lookRotation, -camDelta, targetPos);
     }
 
     private void OnPropClicked(SerializedProperty pObject)
@@ -343,7 +351,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
     private void OnSceneGui(SceneView sceneView)
     {
-        var (camPos, camRot, camForward) = 
+        var (camPos, camRot, camForward, targetPos) = 
             activeObject != null && activeObject.hasCustomSettings ? 
                 GetCameraTransformTuple(
                     activeObject.orbitYaw,
@@ -356,15 +364,14 @@ public partial class ThumbnailEditorWindow : EditorWindow
                     settings.orbitDistance,
                     settings.orbitHeight);
 
-        //where the camera will be pointing
-        var targetPos = new Vector3(0, settings.orbitHeight, 0);
+        var binormal = Vector3.Cross(Vector3.up, camForward).normalized; //camera right
+        var normal = Vector3.Cross(camForward, binormal).normalized; //camera up
 
-        var binormal = Vector3.Cross(Vector3.up, camForward); //camera right
-        var normal = Vector3.Cross(camForward, binormal); //camera up
-
-        Handles.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
-        Handles.CubeHandleCap(0, Vector3.zero, Quaternion.identity, 1, EventType.Repaint);
-
+        if (activeObject == null)
+        {
+            Handles.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
+            Handles.CubeHandleCap(0, Vector3.zero, Quaternion.identity, 1, EventType.Repaint);
+        }
 
         Handles.color = new Color(0f, 0f, 1f, 0.5f);
         Handles.DrawLine(camPos, targetPos);
@@ -373,13 +380,14 @@ public partial class ThumbnailEditorWindow : EditorWindow
         var downFOVVector = Quaternion.AngleAxis(settings.cameraFOV / 2, -binormal) * camForward;
 
         Handles.color = new Color(0f, 1f, 0f, 0.5f);
-        Handles.DrawLine(camPos, camPos + normal);
-        Handles.color = new Color(1f, 0f, 0f, 0.5f);
-        Handles.DrawLine(camPos, camPos + binormal);
-        Handles.color = new Color(1f, 1f, 0f, 0.5f);
-        Handles.DrawLine(camPos, camPos + upFOVVector);
-        Handles.DrawLine(camPos, camPos + downFOVVector);
+        Handles.DrawLine(camPos, camPos + normal * .4f);
+        Handles.color = new Color(1f, 0f, 0f, 0.25f);
+        Handles.DrawLine(camPos, camPos + binormal * .4f);
+        Handles.color = new Color(1f, 1f, 0f, 0.25f);
+        Handles.DrawLine(camPos, camPos + upFOVVector * .3f);
+        Handles.DrawLine(camPos, camPos + downFOVVector * .3f);
         // drawing the box to represent the frame of the thumbnail
+        Handles.color = new Color(1f, 1f, 0f, 0.5f * .75f);
         Handles.RectangleHandleCap(
             0, targetPos,
             camRot,
