@@ -5,7 +5,7 @@ public partial class ThumbnailEditorWindow
 {
 
     [System.Serializable]
-    public class PrefabObject
+    private class PrefabObject
     {
         public GameObject prefabObject;
         public bool hasCustomSettings;
@@ -23,10 +23,10 @@ public partial class ThumbnailEditorWindow
     }
 
     [CustomPropertyDrawer(typeof(PrefabObject))]
-    public class PrefabObjectDrawer : PropertyDrawer
+    private class PrefabObjectDrawer : PropertyDrawer
     {
-        private static Color _selectedColor = new Color(0, 0, 1, .2f);
-        private static Color _backColor = new Color(0, 0, 0, .2f);
+        private static readonly Color _selectedColor = new Color(0, 0, 1, .2f);
+        private static readonly Color _backColor = new Color(0, 0, 0, .2f);
         
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {

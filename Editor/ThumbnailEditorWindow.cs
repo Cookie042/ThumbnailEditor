@@ -9,14 +9,13 @@ using Object = UnityEngine.Object;
 
 public partial class ThumbnailEditorWindow : EditorWindow
 {
-    public static ThumbnailEditorWindow instance;
-
-    public Camera renderCamera;
+    private static ThumbnailEditorWindow instance;
+    private Camera renderCamera;
 
     [System.Serializable]
     public struct ThumbnailEditorSettings
     {
-        public int ThumbnailSize;
+        public int thumbnailSize;
         public string path;
         [Range(-180, 180)]
         public float orbitYaw;
@@ -30,9 +29,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
         public float cameraFOV;
         public int renderLayer;
     }
-    public ThumbnailEditorSettings settings;
+    private ThumbnailEditorSettings settings;
 
-    public List<PrefabObject> prefabObjects = new List<PrefabObject>();
+    private readonly List<PrefabObject> _prefabObjects = new List<PrefabObject>();
 
     private PrefabObject activeObject;
 
@@ -62,7 +61,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
         var renderLayerProp = settingsProp.FindPropertyRelative("renderLayer");
 
         //! Render Mask
-        EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("ThumbnailSize"));
+        EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("thumbnailSize"));
         renderLayerProp.intValue = EditorGUILayout.LayerField(renderLayerProp.intValue);
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("cameraFOV"));
 
@@ -79,23 +78,23 @@ public partial class ThumbnailEditorWindow : EditorWindow
         {
             if (GUILayout.Button("Render All"))
             {
-                RenderPreviews(prefabObjects);
+                RenderPreviews(_prefabObjects);
             }
             if (GUILayout.Button("Render Selected"))
             {
                 List<PrefabObject> selected = 
-                    prefabObjects.Where(prefabObject => prefabObject.selected).ToList();
+                    _prefabObjects.Where(prefabObject => prefabObject.selected).ToList();
                 RenderPreviews(selected);
             }
             if (GUILayout.Button("Save Json/Image Data"))
             {
                 //saving images and a json with the settings used to create it
-                foreach (PrefabObject meshObject in prefabObjects)
+                foreach (PrefabObject meshObject in _prefabObjects)
                 {
                     var jsonPath = Path.Combine(settings.path, meshObject.prefabObject.name + ".thumb.json");
                     var imagePath = Path.Combine(settings.path, meshObject.prefabObject.name + ".png");
                     File.WriteAllText(jsonPath, JsonUtility.ToJson(meshObject));
-                    File.WriteAllBytes(imagePath, meshObject.Thumbnail.EncodeToPNG());
+                    File.WriteAllBytes(imagePath, meshObject.thumbnail.EncodeToPNG());
                 }
             }
         }
@@ -103,8 +102,8 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         EditorGUILayout.LabelField("Mesh List", EditorStyles.boldLabel);
 
-        //get reference to internal prefabObjects list object
-        SerializedProperty meshList = editorWindowObject.FindProperty("prefabObjects");
+        //get reference to internal _prefabObjects list object
+        SerializedProperty meshList = editorWindowObject.FindProperty("_prefabObjects");
 
         //! Draw the mesh list
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.ExpandHeight(true));
@@ -153,12 +152,12 @@ public partial class ThumbnailEditorWindow : EditorWindow
                         {
                             var newobj = JsonUtility.FromJson<PrefabObject>(File.ReadAllText(path));
                             newobj.focused = false;
-                            prefabObjects.Add(newobj);
+                            _prefabObjects.Add(newobj);
 
                         }
                         else
                         {
-                            prefabObjects.Add(new PrefabObject
+                            _prefabObjects.Add(new PrefabObject
                             {
                                 prefabObject = go,
                                 hasCustomSettings = false,
@@ -166,7 +165,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
                                 orbitYaw = settings.orbitYaw,
                                 orbitPitch = settings.orbitPitch,
                                 orbitDistance = settings.orbitDistance,
-                                Thumbnail = Texture2D.whiteTexture
+                                thumbnail = Texture2D.whiteTexture
                             });
                         }
                     }
@@ -181,8 +180,8 @@ public partial class ThumbnailEditorWindow : EditorWindow
         cam.cullingMask = 1 << settings.renderLayer;
         cam.fieldOfView = settings.cameraFOV;
 
-        if (cam.targetTexture.height != settings.ThumbnailSize)
-            cam.targetTexture = new RenderTexture(settings.ThumbnailSize, settings.ThumbnailSize, 32);
+        if (cam.targetTexture.height != settings.thumbnailSize)
+            cam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
 
 
         var DefaultRenderData = GetCameraTransformTuple(settings.orbitYaw, settings.orbitPitch, settings.orbitDistance, settings.orbitHeight);
@@ -228,11 +227,11 @@ public partial class ThumbnailEditorWindow : EditorWindow
                 }
             }
 
-            var texture = new Texture2D(settings.ThumbnailSize, settings.ThumbnailSize);
+            var texture = new Texture2D(settings.thumbnailSize, settings.thumbnailSize);
 
             RenderTargetToTexture(cam, ref texture);
 
-            prefabObject.Thumbnail = texture;
+            prefabObject.thumbnail = texture;
 
             objects[moIndex] = prefabObject;
 
@@ -256,7 +255,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
             var cams = FindObjectsOfType<Camera>();
             foreach (var camera in cams)
             {
-                if (camera.gameObject.name.Contains("Thumbnail Camera"))
+                if (camera.gameObject.name.Contains("thumbnail Camera"))
                 {
                     returnCam = camera;
                     break;
@@ -266,14 +265,14 @@ public partial class ThumbnailEditorWindow : EditorWindow
             //if it didnt find one set one up
             if (returnCam == null)
             {
-                var go = new GameObject("Thumbnail Camera");
+                var go = new GameObject("thumbnail Camera");
                 returnCam = go.AddComponent<Camera>();
                 returnCam.transform.position = Vector3.zero;
                 returnCam.transform.rotation = Quaternion.identity;
                 returnCam.transform.localScale = Vector3.one;
                 returnCam.clearFlags = CameraClearFlags.Color;
                 returnCam.backgroundColor = new Color(0f, 0f, 0f, 0);
-                RenderTexture rt = new RenderTexture(settings.ThumbnailSize, settings.ThumbnailSize, 32);
+                RenderTexture rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
                 returnCam.targetTexture = rt;
 
                 returnCam.cullingMask = settings.renderLayer;
@@ -286,7 +285,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
         return returnCam;
     }
 
-    [MenuItem("Cookie Jar/Thumbnail Renderer")]
+    [MenuItem("Cookie Jar/thumbnail Renderer")]
     public static void ShowWindow()
     {
         instance = GetWindow<ThumbnailEditorWindow>();
@@ -336,7 +335,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
     private void OnPropClicked(SerializedProperty pObject)
     {
         PrefabObject focused = null;
-        foreach (PrefabObject t in prefabObjects)
+        foreach (PrefabObject t in _prefabObjects)
         {
             bool equal = t.prefabObject == pObject.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
             if (equal)
