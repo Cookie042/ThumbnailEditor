@@ -1,5 +1,7 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using UnityEngine;
 using UnityEditor;
 using Debug = UnityEngine.Debug;
@@ -30,8 +32,10 @@ public partial class ThumbnailEditorWindow : EditorWindow
     }
     public ThumbnailEditorSettings settings;
 
-    public List<MeshObject> meshes = new List<MeshObject>();
-    
+    public List<PrefabObject> prefabObjects = new List<PrefabObject>();
+
+    private PrefabObject activeObject;
+
     private Vector2 scrollPos = Vector2.zero;
 
     private void OnGUI()
@@ -75,16 +79,18 @@ public partial class ThumbnailEditorWindow : EditorWindow
         {
             if (GUILayout.Button("Refresh All"))
             {
-                RenderPreviews(meshes);
+                RenderPreviews(prefabObjects);
             }
             if (GUILayout.Button("RefreshSelected"))
             {
-
+                List<PrefabObject> selected = 
+                    prefabObjects.Where(prefabObject => prefabObject.selected).ToList();
+                RenderPreviews(selected);
             }
             if (GUILayout.Button("Save Data"))
             {
                 //saving images and a json with the settings used to create it
-                foreach (MeshObject meshObject in meshes)
+                foreach (PrefabObject meshObject in prefabObjects)
                 {
                     var jsonPath = Path.Combine(settings.path, meshObject.prefabObject.name + ".thumb.json");
                     var imagePath = Path.Combine(settings.path, meshObject.prefabObject.name + ".png");
@@ -97,8 +103,8 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         EditorGUILayout.LabelField("Mesh List", EditorStyles.boldLabel);
 
-        //get reference to internal meshes list object
-        SerializedProperty meshList = editorWindowObject.FindProperty("meshes");
+        //get reference to internal prefabObjects list object
+        SerializedProperty meshList = editorWindowObject.FindProperty("prefabObjects");
 
         //! Draw the mesh list
         scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.ExpandHeight(true));
@@ -145,18 +151,21 @@ public partial class ThumbnailEditorWindow : EditorWindow
                         var path = Path.Combine(settings.path, go.name + ".thumb.json");
                         if (File.Exists(path))
                         {
-                            meshes.Add(JsonUtility.FromJson<MeshObject>(File.ReadAllText(path)));
+                            var newobj = JsonUtility.FromJson<PrefabObject>(File.ReadAllText(path));
+                            newobj.focused = false;
+                            prefabObjects.Add(newobj);
+
                         }
                         else
                         {
-                            meshes.Add(new MeshObject
+                            prefabObjects.Add(new PrefabObject
                             {
                                 prefabObject = go,
                                 hasCustomSettings = false,
                                 orbitHeight = settings.orbitHeight,
                                 orbitYaw = settings.orbitYaw,
                                 orbitPitch = settings.orbitPitch,
-                                orbitDistance = settings.orbitHeight,
+                                orbitDistance = settings.orbitDistance,
                                 Thumbnail = Texture2D.whiteTexture
                             });
                         }
@@ -166,7 +175,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
         }
     }
 
-    private void RenderPreviews(List<MeshObject> objects)
+    private void RenderPreviews(List<PrefabObject> objects)
     {
         Camera cam = GetRenderCamera();
         cam.cullingMask = 1 << settings.renderLayer;
@@ -180,12 +189,12 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         for (var moIndex = 0; moIndex < objects.Count; moIndex++)
         {
-            MeshObject meshObject = objects[moIndex];
+            PrefabObject prefabObject = objects[moIndex];
             //if it has custom render settings, set them
-            if (meshObject.hasCustomSettings)
-                activeData = GetCameraTransformTuple(meshObject.orbitYaw, meshObject.orbitPitch,
-                    meshObject.orbitDistance,
-                    meshObject.orbitHeight);
+            if (prefabObject.hasCustomSettings)
+                activeData = GetCameraTransformTuple(prefabObject.orbitYaw, prefabObject.orbitPitch,
+                    prefabObject.orbitDistance,
+                    prefabObject.orbitHeight);
             else
                 activeData = DefaultRenderData;
 
@@ -193,7 +202,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
             //Matrix4x4 mtx = Matrix4x4.TRS(Vector3.zero , Quaternion.identity, Vector3.one);
 
             //find every mesh renderer in the prefab
-            MeshRenderer[] mrs = meshObject.prefabObject.GetComponentsInChildren<MeshRenderer>();
+            MeshRenderer[] mrs = prefabObject.prefabObject.GetComponentsInChildren<MeshRenderer>();
             foreach (MeshRenderer mr in mrs)
             {
                 //get the matching mesh filter
@@ -217,12 +226,12 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
             RenderTargetToTexture(cam, ref texture);
 
-            meshObject.Thumbnail = texture;
+            prefabObject.Thumbnail = texture;
 
-            objects[moIndex] = meshObject;
+            objects[moIndex] = prefabObject;
             var pngData = texture.EncodeToPNG();
 
-            var imagePath = Path.Combine(settings.path, meshObject.prefabObject.name + ".png");
+            var imagePath = Path.Combine(settings.path, prefabObject.prefabObject.name + ".png");
             // For testing purposes, also write to a file in the project folder
             File.WriteAllBytes(imagePath, pngData);
 
@@ -274,13 +283,26 @@ public partial class ThumbnailEditorWindow : EditorWindow
     {
         instance = GetWindow<ThumbnailEditorWindow>();
         SceneView.onSceneGUIDelegate += instance.OnSceneGui;
+        Camera.onPreCull += instance.DrawActivePreview;
 
         //load setting data
         if (EditorPrefs.HasKey("ThumbData"))
             instance.settings = JsonUtility.FromJson<ThumbnailEditorSettings>(EditorPrefs.GetString("ThumbData"));
 
+
         instance.Show();
     }
+
+    private void DrawActivePreview(Camera camera)
+    {
+        if (activeObject != null)
+        {
+            Graphics.DrawMesh(activeObject.prefabObject.GetComponent<MeshFilter>().sharedMesh, Matrix4x4.identity,
+                activeObject.prefabObject.GetComponent<MeshRenderer>().sharedMaterial, 0, camera);
+        }
+
+    }
+
 
     private static (Vector3 pos, Quaternion rot, Vector3 forward) GetCameraTransformTuple(float yaw, float pitch, float distance, float height)
     {
@@ -297,56 +319,81 @@ public partial class ThumbnailEditorWindow : EditorWindow
         camDelta = Quaternion.AngleAxis(-yaw, Vector3.up) * camDelta;
 
         var lookRotation = Quaternion.LookRotation(-camDelta.normalized, Vector3.up);
-        
+
         var camPosition = camDelta + targetPos;
 
-        return (camPosition, lookRotation, camDelta);
+        return (camPosition, lookRotation, -camDelta);
+    }
+
+    private void OnPropClicked(SerializedProperty pObject)
+    {
+        PrefabObject focused = null;
+        foreach (PrefabObject t in prefabObjects)
+        {
+            bool equal = t.prefabObject == pObject.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
+            if (equal)
+                focused = t;
+            t.focused = equal;
+        }
+        activeObject = focused;
+
+        Repaint();
+        
     }
 
     private void OnSceneGui(SceneView sceneView)
     {
         var (camPos, camRot, camForward) = 
-            GetCameraTransformTuple(
-                settings.orbitYaw, 
-                settings.orbitPitch, 
-                settings.orbitDistance,
-                settings.orbitHeight);
+            activeObject != null && activeObject.hasCustomSettings ? 
+                GetCameraTransformTuple(
+                    activeObject.orbitYaw,
+                    activeObject.orbitPitch,
+                    activeObject.orbitDistance,
+                    activeObject.orbitHeight) :
+                GetCameraTransformTuple(
+                    settings.orbitYaw,
+                    settings.orbitPitch,
+                    settings.orbitDistance,
+                    settings.orbitHeight);
 
         //where the camera will be pointing
-        var targetPos = new Vector3(0,settings.orbitHeight, 0);
-        
+        var targetPos = new Vector3(0, settings.orbitHeight, 0);
+
         var binormal = Vector3.Cross(Vector3.up, camForward); //camera right
         var normal = Vector3.Cross(camForward, binormal); //camera up
 
         Handles.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
-        Handles.CubeHandleCap(0,Vector3.zero, Quaternion.identity, 1, EventType.Repaint);
+        Handles.CubeHandleCap(0, Vector3.zero, Quaternion.identity, 1, EventType.Repaint);
 
-        Handles.color = new Color(1f, 0.67f, 0f, 0.5f);
-        // drawing the box to represent the frame of the thumbnail
-        Handles.RectangleHandleCap(
-            0, targetPos, 
-            camRot, 
-            //quick and dirty field of view as a function of distance math
-            (camPos - targetPos).magnitude * Mathf.Tan(settings.cameraFOV / 2 * Mathf.Deg2Rad),
-            EventType.Repaint);
 
-        Handles.color = new Color(1f, 0f, 0f, 0.5f);
+        Handles.color = new Color(0f, 0f, 1f, 0.5f);
         Handles.DrawLine(camPos, targetPos);
 
         var upFOVVector = Quaternion.AngleAxis(settings.cameraFOV / 2, binormal) * camForward;
         var downFOVVector = Quaternion.AngleAxis(settings.cameraFOV / 2, -binormal) * camForward;
 
+        Handles.color = new Color(0f, 1f, 0f, 0.5f);
         Handles.DrawLine(camPos, camPos + normal);
+        Handles.color = new Color(1f, 0f, 0f, 0.5f);
         Handles.DrawLine(camPos, camPos + binormal);
+        Handles.color = new Color(1f, 1f, 0f, 0.5f);
         Handles.DrawLine(camPos, camPos + upFOVVector);
         Handles.DrawLine(camPos, camPos + downFOVVector);
+        // drawing the box to represent the frame of the thumbnail
+        Handles.RectangleHandleCap(
+            0, targetPos,
+            camRot,
+            //quick and dirty field of view as a function of distance math
+            (camPos - targetPos).magnitude * Mathf.Tan(settings.cameraFOV / 2 * Mathf.Deg2Rad),
+            EventType.Repaint);
 
         Handles.color = new Color(0f, 0.82f, 1f, 0.5f);
         Handles.matrix = Matrix4x4.TRS(camPos, camRot, Vector3.one);
-        Handles.DrawWireCube(Vector3.zero, new Vector3( .25f, .25f, .5f));
+        Handles.DrawWireCube(Vector3.zero, new Vector3(.25f, .25f, .5f));
 
         //Handles.BeginGUI();
         //Handles.EndGUI();
+        sceneView.Repaint();
     }
 
     private void OnDestroy()

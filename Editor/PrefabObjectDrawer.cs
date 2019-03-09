@@ -1,12 +1,12 @@
-﻿using UnityEngine;
+﻿using System;
+using UnityEngine;
 using UnityEditor;
-using UnityEngine.Rendering;
 
 public partial class ThumbnailEditorWindow
 {
 
     [System.Serializable]
-    public struct MeshObject
+    public class PrefabObject
     {
         public GameObject prefabObject;
         public bool hasCustomSettings;
@@ -19,22 +19,26 @@ public partial class ThumbnailEditorWindow
         [Range(-2, 2)]
         public float orbitHeight;
         public Texture2D Thumbnail;
-
         public bool selected;
+        public bool focused;
     }
 
-    [CustomPropertyDrawer(typeof(MeshObject))]
-    public class MeshObjectDrawer : PropertyDrawer
+    [CustomPropertyDrawer(typeof(PrefabObject))]
+    public class PrefabObjectDrawer : PropertyDrawer
     {
         private static Color _selectedColor = new Color(0, 0, 1, .2f);
         private static Color _backColor = new Color(0, 0, 0, .2f);
-
+        
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
-
             EditorGUI.indentLevel = 2;
             Rect indentedRect = EditorGUI.IndentedRect(position);
             EditorGUI.indentLevel = 0;
+
+            if ( Event.current.type == EventType.MouseDown && Event.current.button == 1 && position.Contains(Event.current.mousePosition))
+            {
+                instance.OnPropClicked(property);
+            }
 
             EditorGUIUtility.wideMode = true;
 
@@ -52,21 +56,16 @@ public partial class ThumbnailEditorWindow
             var thumbnail = property.FindPropertyRelative("Thumbnail");
             var isSelected = property.FindPropertyRelative("selected");
             var prefab = property.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
-
-
-            if (Event.current.type == EventType.MouseDown)
-            {
-                if (position.Contains(Event.current.mousePosition))
-                {
-                    isSelected.boolValue = true;
-                }
-
-            }
-
-
+            
             var thumbRect = new Rect(indentedRect);
             thumbRect.width = thumbRect.height = ThumbnailHeight;
+
+            var isFocused = property.FindPropertyRelative("focused");
             EditorGUI.DrawRect(indentedRect, isSelected.boolValue ? _selectedColor : _backColor );
+            if (isFocused.boolValue)
+            {
+                EditorGUI.DrawRect(new Rect(thumbRect.x - 10, thumbRect.y, 5, thumbRect.height), new Color(0f, 0f, 1f, 0.39f));
+            }
 
             //EditorGUI.DrawTextureTransparent(thumbRect, thumbnail.objectReferenceValue as Texture2D);
             //EditorGUI.DrawTextureAlpha(thumbRect, thumbnail.objectReferenceValue as Texture2D);
