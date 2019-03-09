@@ -17,7 +17,7 @@ public partial class ThumbnailEditorWindow
         public float orbitDistance;
         [Range(-2, 2)]
         public float orbitHeight;
-        public Texture2D Thumbnail;
+        public Texture2D thumbnail;
         public bool selected;
         public bool focused;
     }
@@ -52,7 +52,7 @@ public partial class ThumbnailEditorWindow
             var orbitPitch = property.FindPropertyRelative("orbitPitch");
             var orbitDistance = property.FindPropertyRelative("orbitDistance");
             var orbitHeight = property.FindPropertyRelative("orbitHeight");
-            var thumbnail = property.FindPropertyRelative("Thumbnail");
+            var thumbnail = property.FindPropertyRelative("thumbnail");
             var isSelected = property.FindPropertyRelative("selected");
             var prefab = property.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
             
