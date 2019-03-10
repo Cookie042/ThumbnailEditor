@@ -7,7 +7,7 @@ public partial class ThumbnailEditorWindow
     [System.Serializable]
     public class PrefabObject
     {
-        public GameObject prefabObject;
+        public GameObject prefab;
         public bool hasCustomSettings;
         [Range(-180,180)]
         public float orbitYaw;
@@ -65,7 +65,7 @@ public partial class ThumbnailEditorWindow
             var orbitHeight = property.FindPropertyRelative("orbitHeight");
             var thumbnail = property.FindPropertyRelative("thumbnail");
             var isSelected = property.FindPropertyRelative("selected");
-            var prefab = property.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
+            var prefab = property.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
             
             var thumbRect = new Rect(indentedRect);
             thumbRect.width = thumbRect.height = ThumbnailHeight;
@@ -122,7 +122,7 @@ public partial class ThumbnailEditorWindow
 
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
-            var prefab = property.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
+            var prefab = property.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
             
             var lheight = EditorGUIUtility.singleLineHeight;
             var lspace = EditorGUIUtility.standardVerticalSpacing;

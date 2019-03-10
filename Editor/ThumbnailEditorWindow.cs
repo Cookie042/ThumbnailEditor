@@ -91,9 +91,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
                 //saving images and a json with the settings used to create it
                 foreach (PrefabObject meshObject in _prefabObjects)
                 {
-                    var jsonPath = Path.Combine(settings.path, meshObject.prefabObject.name + ".thumb.json");
-                    var imagePath = Path.Combine(settings.path, meshObject.prefabObject.name + ".png");
-                    File.WriteAllText(jsonPath, JsonUtility.ToJson(meshObject));
+                    var jsonPath = Path.Combine(settings.path, meshObject.prefab.name + ".thumb.json");
+                    var imagePath = Path.Combine(settings.path, meshObject.prefab.name + ".png");
+                    File.WriteAllText(jsonPath, JsonUtility.ToJson(meshObject,true));
                     File.WriteAllBytes(imagePath, meshObject.thumbnail.EncodeToPNG());
                 }
             }
@@ -159,7 +159,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
                         {
                             _prefabObjects.Add(new PrefabObject
                             {
-                                prefabObject = go,
+                                prefab = go,
                                 hasCustomSettings = false,
                                 orbitHeight = settings.orbitHeight,
                                 orbitYaw = settings.orbitYaw,
@@ -179,9 +179,10 @@ public partial class ThumbnailEditorWindow : EditorWindow
         Camera cam = GetRenderCamera();
         cam.cullingMask = 1 << settings.renderLayer;
         cam.fieldOfView = settings.cameraFOV;
+        
 
         if (cam.targetTexture.height != settings.thumbnailSize)
-            cam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
+            cam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) {antiAliasing = 8, filterMode = FilterMode.Trilinear, anisoLevel = 16};
 
 
         var DefaultRenderData = GetCameraTransformTuple(settings.orbitYaw, settings.orbitPitch, settings.orbitDistance, settings.orbitHeight);
@@ -189,60 +190,31 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         for (var moIndex = 0; moIndex < objects.Count; moIndex++)
         {
-            PrefabObject prefabObject = objects[moIndex];
+            PrefabObject po = objects[moIndex];
             //if it has custom render settings, set them
-            if (prefabObject.hasCustomSettings)
+            if (po.hasCustomSettings)
             {
                 activeData = GetCameraTransformTuple(
-                    prefabObject.orbitYaw, 
-                    prefabObject.orbitPitch,
-                    prefabObject.orbitDistance,
-                    prefabObject.orbitHeight);
+                    po.orbitYaw, 
+                    po.orbitPitch,
+                    po.orbitDistance,
+                    po.orbitHeight);
             }
             else
                 activeData = DefaultRenderData;
 
 
-            Matrix4x4 mtx = Matrix4x4.TRS(activeData.pos, activeData.rot, Vector3.one);
-            //Matrix4x4 mtx = Matrix4x4.TRS(Vector3.zero , Quaternion.identity, Vector3.one);
+            Matrix4x4 mtx = Matrix4x4.TRS(activeData.pos, activeData.rot, Vector3.one).inverse;
 
-            //find every mesh renderer in the prefab
-            MeshRenderer[] mrs = prefabObject.prefabObject.GetComponentsInChildren<MeshRenderer>();
-            foreach (MeshRenderer mr in mrs)
-            {
-                //get the matching mesh filter
-                MeshFilter mf = mr.gameObject.GetComponent<MeshFilter>();
-                Mesh mesh = mf.sharedMesh;
-                int subMeshCount = mf.sharedMesh.subMeshCount;
-                for (int i = 0; i < subMeshCount; i++)
-                {
-                    Material submeshMaterial = mr.sharedMaterials[i];
-                    if (submeshMaterial)
-                    {
-                        Graphics.DrawMesh(mesh, mtx.inverse, submeshMaterial, settings.renderLayer, cam);
-                        Debug.Log("rendered to " + 0);
-                    }
-                    else
-                        Debug.LogError("missing material for submesh index: " + i);
-                }
-            }
+            RecursiveDrawGameObject(mtx, po.prefab, settings.renderLayer, cam);
 
             var texture = new Texture2D(settings.thumbnailSize, settings.thumbnailSize);
 
             RenderTargetToTexture(cam, ref texture);
 
-            prefabObject.thumbnail = texture;
+            po.thumbnail = texture;
 
-            objects[moIndex] = prefabObject;
-
-
-            //var pngData = texture.EncodeToPNG();
-
-            //var imagePath = Path.Combine(settings.path, prefabObject.prefabObject.name + ".png");
-            // For testing purposes, also write to a file in the project folder
-            //File.WriteAllBytes(imagePath, pngData);
-
-            //AssetDatabase.CreateAsset(t, $"Assets/{levelTile.name}.png");
+            objects[moIndex] = po;
         }
     }
 
@@ -261,10 +233,11 @@ public partial class ThumbnailEditorWindow : EditorWindow
                     break;
                 }
             }
-
             //if it didnt find one set one up
             if (returnCam == null)
             {
+                var rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) {antiAliasing = 8};
+
                 var go = new GameObject("thumbnail Camera");
                 returnCam = go.AddComponent<Camera>();
                 returnCam.transform.position = Vector3.zero;
@@ -272,7 +245,6 @@ public partial class ThumbnailEditorWindow : EditorWindow
                 returnCam.transform.localScale = Vector3.one;
                 returnCam.clearFlags = CameraClearFlags.Color;
                 returnCam.backgroundColor = Color.clear;
-                RenderTexture rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
                 returnCam.targetTexture = rt;
 
                 returnCam.cullingMask = settings.renderLayer;
@@ -294,8 +266,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
         SceneView.onSceneGUIDelegate -= instance.OnSceneGui; //yuck...why unity whyyyy!?!
         SceneView.onSceneGUIDelegate += instance.OnSceneGui;
         //callback so that we can draw a preview of the active mesh in the sceneview camera
-        Camera.onPreCull -= instance.DrawActivePreview;
-        Camera.onPreCull += instance.DrawActivePreview;
+        Camera.onPreCull -= instance.DrawActiveObjectScenePreview;
+        Camera.onPreCull += instance.DrawActiveObjectScenePreview;
+        instance.activeObject = null;
 
         //load setting data, it's stashed as a really long string encodeded using json
         //easier than making individual prefs for each settings property. much easier to save also.
@@ -304,16 +277,11 @@ public partial class ThumbnailEditorWindow : EditorWindow
         instance.Show();
     }
 
-    private void DrawActivePreview(Camera camera)
+    private void DrawActiveObjectScenePreview(Camera cam)
     {
         if (activeObject != null)
         {
-            //quick and dirty... TODO: make this actually render the whole prefabs MeshRenderer heirarcy like RenderPreviews(...) is doing. GameObject extention method?
-            Graphics.DrawMesh(
-                activeObject.prefabObject.GetComponent<MeshFilter>().sharedMesh, 
-                Matrix4x4.identity,
-                activeObject.prefabObject.GetComponent<MeshRenderer>().sharedMaterial, 
-                0, camera);
+            RecursiveDrawGameObject(activeObject.prefab.transform.worldToLocalMatrix, activeObject.prefab,0, cam);
         }
 
     }
@@ -346,7 +314,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
         foreach (PrefabObject t in _prefabObjects)
         {
             //matching based on prefab gameobject reference
-            bool equal = t.prefabObject == pObject.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
+            bool equal = t.prefab == pObject.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
             if (equal)
                 focused = t;
             t.focused = equal; //sets matching to true, non to false
@@ -420,13 +388,16 @@ public partial class ThumbnailEditorWindow : EditorWindow
     private void OnDestroy()
     {
         SceneView.onSceneGUIDelegate -= OnSceneGui;
+        Camera.onPreCull -= instance.DrawActiveObjectScenePreview;
+
+        activeObject = null;
 
         if (!instance)
             instance = GetWindow<ThumbnailEditorWindow>();
 
         Debug.Log("OnDestroy");
         EditorPrefs.DeleteKey("ThumbPath");
-        EditorPrefs.SetString("ThumbData", JsonUtility.ToJson(instance.settings));
+        EditorPrefs.SetString("ThumbData", JsonUtility.ToJson(instance.settings, true));
         instance = null;
 
         if (renderCamera != null)
@@ -451,6 +422,33 @@ public partial class ThumbnailEditorWindow : EditorWindow
         texture.Apply();
         //restore the previous render target
         RenderTexture.active = currentRt;
+    }
+
+
+    public void RecursiveDrawGameObject(Matrix4x4 rootWorldToLocalTransform, GameObject target, int renderLayer, Camera cam)
+    {
+        foreach (Transform child in target.transform)
+        {
+            var mesh = child.GetComponent<MeshFilter>()?.sharedMesh;
+            var mats = child.GetComponent<MeshRenderer>()?.sharedMaterials;
+
+            if (mesh == null || mats == null)
+                continue;
+
+            var relativeXform = rootWorldToLocalTransform * child.localToWorldMatrix;
+
+            for (var i = 0; i < mats.Length && i < mesh.subMeshCount; i++)
+            {
+                var material = mats[i];
+                if (material != null && i < mesh.subMeshCount)
+                    Graphics.DrawMesh(mesh, relativeXform, material, renderLayer, cam);
+            }
+
+            //Graphics.DrawMesh(mesh, transform.localToWorldMatrix * relativeXform, mats, 0);
+
+            if (child.childCount != 0)
+                RecursiveDrawGameObject(rootWorldToLocalTransform, child.gameObject, renderLayer, cam);
+        }
     }
 
 }
