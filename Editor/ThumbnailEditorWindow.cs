@@ -10,7 +10,7 @@ using Object = UnityEngine.Object;
 public partial class ThumbnailEditorWindow : EditorWindow
 {
     private static ThumbnailEditorWindow instance;
-    private Camera renderCamera;
+    public Camera renderCamera;
 
     [System.Serializable]
     public struct ThumbnailEditorSettings
@@ -29,9 +29,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
         public float cameraFOV;
         public int renderLayer;
     }
-    private ThumbnailEditorSettings settings;
+    public ThumbnailEditorSettings settings;
 
-    private readonly List<PrefabObject> _prefabObjects = new List<PrefabObject>();
+    public List<PrefabObject> _prefabObjects = new List<PrefabObject>();
 
     private PrefabObject activeObject;
 
@@ -271,32 +271,36 @@ public partial class ThumbnailEditorWindow : EditorWindow
                 returnCam.transform.rotation = Quaternion.identity;
                 returnCam.transform.localScale = Vector3.one;
                 returnCam.clearFlags = CameraClearFlags.Color;
-                returnCam.backgroundColor = new Color(0f, 0f, 0f, 0);
+                returnCam.backgroundColor = Color.clear;
                 RenderTexture rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
                 returnCam.targetTexture = rt;
 
                 returnCam.cullingMask = settings.renderLayer;
-                //returnCam.cullingMask = renderLayer;
             }
         }
 
         renderCamera = returnCam;
 
+        //surely we have one by now
         return returnCam;
     }
 
     [MenuItem("Cookie Jar/thumbnail Renderer")]
     public static void ShowWindow()
     {
+        //get one if it already exists
         instance = GetWindow<ThumbnailEditorWindow>();
+        //delegate to the scenview render method, so we can draw gizmos in the scene using Editor GUI Handles
+        SceneView.onSceneGUIDelegate -= instance.OnSceneGui; //yuck...why unity whyyyy!?!
         SceneView.onSceneGUIDelegate += instance.OnSceneGui;
+        //callback so that we can draw a preview of the active mesh in the sceneview camera
+        Camera.onPreCull -= instance.DrawActivePreview;
         Camera.onPreCull += instance.DrawActivePreview;
 
-        //load setting data
+        //load setting data, it's stashed as a really long string encodeded using json
+        //easier than making individual prefs for each settings property. much easier to save also.
         if (EditorPrefs.HasKey("ThumbData"))
             instance.settings = JsonUtility.FromJson<ThumbnailEditorSettings>(EditorPrefs.GetString("ThumbData"));
-
-
         instance.Show();
     }
 
@@ -304,12 +308,15 @@ public partial class ThumbnailEditorWindow : EditorWindow
     {
         if (activeObject != null)
         {
-            Graphics.DrawMesh(activeObject.prefabObject.GetComponent<MeshFilter>().sharedMesh, Matrix4x4.identity,
-                activeObject.prefabObject.GetComponent<MeshRenderer>().sharedMaterial, 0, camera);
+            //quick and dirty... TODO: make this actually render the whole prefabs MeshRenderer heirarcy like RenderPreviews(...) is doing. GameObject extention method?
+            Graphics.DrawMesh(
+                activeObject.prefabObject.GetComponent<MeshFilter>().sharedMesh, 
+                Matrix4x4.identity,
+                activeObject.prefabObject.GetComponent<MeshRenderer>().sharedMaterial, 
+                0, camera);
         }
 
     }
-
 
     private static (Vector3 pos, Quaternion rot, Vector3 forward, Vector3 target) GetCameraTransformTuple(float yaw, float pitch, float distance, float height)
     {
@@ -332,24 +339,26 @@ public partial class ThumbnailEditorWindow : EditorWindow
         return (camPosition, lookRotation, -camDelta, targetPos);
     }
 
+    //really hacky way of managing the active focused object. TODO: do better
     private void OnPropClicked(SerializedProperty pObject)
     {
         PrefabObject focused = null;
         foreach (PrefabObject t in _prefabObjects)
         {
+            //matching based on prefab gameobject reference
             bool equal = t.prefabObject == pObject.FindPropertyRelative("prefabObject").objectReferenceValue as GameObject;
             if (equal)
                 focused = t;
-            t.focused = equal;
+            t.focused = equal; //sets matching to true, non to false
         }
         activeObject = focused;
 
-        Repaint();
-        
+        Repaint(); //because we're changing the state of 'focused' on all the objects, used by the propertyDrawer
     }
 
     private void OnSceneGui(SceneView sceneView)
     {
+        //geting camera data based on if the active object exists and has custom settings
         var (camPos, camRot, camForward, targetPos) = 
             activeObject != null && activeObject.hasCustomSettings ? 
                 GetCameraTransformTuple(
@@ -366,22 +375,28 @@ public partial class ThumbnailEditorWindow : EditorWindow
         var binormal = Vector3.Cross(Vector3.up, camForward).normalized; //camera right
         var normal = Vector3.Cross(camForward, binormal).normalized; //camera up
 
+        //if there is no active object, just draw a 1x1x1m ghost cube at the center
         if (activeObject == null)
         {
             Handles.color = new Color(0.5f, 0.5f, 0.5f, 0.5f);
             Handles.CubeHandleCap(0, Vector3.zero, Quaternion.identity, 1, EventType.Repaint);
         }
 
+        //drawing the forward vector of the camera
         Handles.color = new Color(0f, 0f, 1f, 0.5f);
         Handles.DrawLine(camPos, targetPos);
 
+        //showing the verticle angle of view
         var upFOVVector = Quaternion.AngleAxis(settings.cameraFOV / 2, binormal) * camForward;
         var downFOVVector = Quaternion.AngleAxis(settings.cameraFOV / 2, -binormal) * camForward;
 
+        //camera local y
         Handles.color = new Color(0f, 1f, 0f, 0.5f);
         Handles.DrawLine(camPos, camPos + normal * .4f);
+        //camera local x
         Handles.color = new Color(1f, 0f, 0f, 0.25f);
         Handles.DrawLine(camPos, camPos + binormal * .4f);
+        //camera FOV
         Handles.color = new Color(1f, 1f, 0f, 0.25f);
         Handles.DrawLine(camPos, camPos + upFOVVector * .3f);
         Handles.DrawLine(camPos, camPos + downFOVVector * .3f);
@@ -394,12 +409,11 @@ public partial class ThumbnailEditorWindow : EditorWindow
             (camPos - targetPos).magnitude * Mathf.Tan(settings.cameraFOV / 2 * Mathf.Deg2Rad),
             EventType.Repaint);
 
+        //drawing a little cube to represent the camera
         Handles.color = new Color(0f, 0.82f, 1f, 0.5f);
         Handles.matrix = Matrix4x4.TRS(camPos, camRot, Vector3.one);
         Handles.DrawWireCube(Vector3.zero, new Vector3(.25f, .25f, .5f));
 
-        //Handles.BeginGUI();
-        //Handles.EndGUI();
         sceneView.Repaint();
     }
 

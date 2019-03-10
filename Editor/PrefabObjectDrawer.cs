@@ -5,7 +5,7 @@ public partial class ThumbnailEditorWindow
 {
 
     [System.Serializable]
-    private class PrefabObject
+    public class PrefabObject
     {
         public GameObject prefabObject;
         public bool hasCustomSettings;
@@ -34,15 +34,26 @@ public partial class ThumbnailEditorWindow
             Rect indentedRect = EditorGUI.IndentedRect(position);
             EditorGUI.indentLevel = 0;
 
-            if ( Event.current.type == EventType.MouseDown && Event.current.button == 1 && position.Contains(Event.current.mousePosition))
+            var curEvent = Event.current;
+            if (curEvent.type == EventType.MouseDown && position.Contains(curEvent.mousePosition))
             {
-                instance.OnPropClicked(property);
+                if (curEvent.button == 1)
+                {
+                    instance.OnPropClicked(property);
+                }
+                else if (curEvent.button == 0)
+                {
+                    if (curEvent.shift)
+                    {
+                        
+                    }
+                }
+
             }
 
             EditorGUIUtility.wideMode = true;
 
             var height = EditorGUIUtility.singleLineHeight;
-            var width = indentedRect.width;
             var spacing = EditorGUIUtility.standardVerticalSpacing;
 
             var ThumbnailHeight = height * 3 + spacing * 2;
@@ -83,8 +94,8 @@ public partial class ThumbnailEditorWindow
                 EditorGUI.LabelField(LeftAreaRect, prefab.name);
             LeftAreaRect.x += LeftAreaRect.width + spacing;
             EditorGUI.PropertyField(LeftAreaRect, isCustomSettings, new GUIContent("Customize"));
-            LeftAreaRect.x += LeftAreaRect.width + spacing;
-            EditorGUI.PropertyField(LeftAreaRect, isSelected, new GUIContent("Select"));
+            //LeftAreaRect.x += LeftAreaRect.width + spacing;
+            //EditorGUI.PropertyField(LeftAreaRect, isSelected, new GUIContent("Select"));
 
 
             LeftAreaRect.xMin = thumbRect.xMax + spacing;
