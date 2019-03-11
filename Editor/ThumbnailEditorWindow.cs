@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using UnityEngine;
 using UnityEditor;
+using UnityEngine.Rendering.PostProcessing;
 using Debug = UnityEngine.Debug;
 using Object = UnityEngine.Object;
 
@@ -28,9 +29,13 @@ public partial class ThumbnailEditorWindow : EditorWindow
         [Range(.1f, 130f)]
         public float cameraFOV;
         public int renderLayer;
+
+        public PostProcessProfile postProfile;
+        public PostProcessLayer.Antialiasing AAMode;
+
     }
     public ThumbnailEditorSettings settings;
-
+    
     public List<PrefabObject> _prefabObjects = new List<PrefabObject>();
 
     private PrefabObject activeObject;
@@ -70,6 +75,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("orbitPitch"));
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("orbitHeight"));
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("orbitDistance"));
+
+        EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("postProfile"));
+        EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("AAMode"));
 
         //var settingsProp = editorWindowObject.FindProperty("settings");
         //EditorGUILayout.PropertyField(settingsProp, true);
@@ -239,7 +247,16 @@ public partial class ThumbnailEditorWindow : EditorWindow
                 var rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) {antiAliasing = 8};
 
                 var go = new GameObject("thumbnail Camera");
+                go.layer = settings.renderLayer;
                 returnCam = go.AddComponent<Camera>();
+
+                var postLayer = go.AddComponent<PostProcessLayer>();
+                postLayer.antialiasingMode = settings.AAMode;
+                postLayer.volumeLayer = 1 << settings.renderLayer;
+                var postVolume = go.AddComponent<PostProcessVolume>();
+                postVolume.isGlobal = true;
+                postVolume.profile = settings.postProfile;
+
                 returnCam.transform.position = Vector3.zero;
                 returnCam.transform.rotation = Quaternion.identity;
                 returnCam.transform.localScale = Vector3.one;
@@ -427,28 +444,29 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
     public void RecursiveDrawGameObject(Matrix4x4 rootWorldToLocalTransform, GameObject target, int renderLayer, Camera cam)
     {
+
         foreach (Transform child in target.transform)
         {
-            var mesh = child.GetComponent<MeshFilter>()?.sharedMesh;
-            var mats = child.GetComponent<MeshRenderer>()?.sharedMaterials;
-
-            if (mesh == null || mats == null)
-                continue;
-
-            var relativeXform = rootWorldToLocalTransform * child.localToWorldMatrix;
-
-            for (var i = 0; i < mats.Length && i < mesh.subMeshCount; i++)
-            {
-                var material = mats[i];
-                if (material != null && i < mesh.subMeshCount)
-                    Graphics.DrawMesh(mesh, relativeXform, material, renderLayer, cam);
-            }
-
-            //Graphics.DrawMesh(mesh, transform.localToWorldMatrix * relativeXform, mats, 0);
-
-            if (child.childCount != 0)
-                RecursiveDrawGameObject(rootWorldToLocalTransform, child.gameObject, renderLayer, cam);
+            RecursiveDrawGameObject(rootWorldToLocalTransform, child.gameObject, renderLayer, cam);
         }
+        var mf = target.GetComponent<MeshFilter>();
+        var mr = target.GetComponent<MeshRenderer>();
+
+        if (mf == null || mr == null)
+            return;
+
+        var mesh = mf.sharedMesh;
+        var mats = mr.sharedMaterials;
+
+        var relativeXform = rootWorldToLocalTransform * target.transform.localToWorldMatrix;
+
+        for (var i = 0; i < mats.Length && i < mesh.subMeshCount; i++)
+        {
+            var material = mats[i];
+            if (material != null && i < mesh.subMeshCount)
+                Graphics.DrawMesh(mesh, relativeXform, material, renderLayer, cam);
+        }
+
     }
 
 }
