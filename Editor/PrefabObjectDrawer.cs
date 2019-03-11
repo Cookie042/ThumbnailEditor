@@ -34,22 +34,6 @@ public partial class ThumbnailEditorWindow
             Rect indentedRect = EditorGUI.IndentedRect(position);
             EditorGUI.indentLevel = 0;
 
-            var curEvent = Event.current;
-            if (curEvent.type == EventType.MouseDown && position.Contains(curEvent.mousePosition))
-            {
-                if (curEvent.button == 1)
-                {
-                    instance.OnPropClicked(property);
-                }
-                else if (curEvent.button == 0)
-                {
-                    if (curEvent.shift)
-                    {
-                        
-                    }
-                }
-
-            }
 
             EditorGUIUtility.wideMode = true;
 
@@ -69,7 +53,17 @@ public partial class ThumbnailEditorWindow
             
             var thumbRect = new Rect(indentedRect);
             thumbRect.width = thumbRect.height = ThumbnailHeight;
-
+            
+            var curEvent = Event.current;
+            if (curEvent.type == EventType.MouseDown && position.Contains(curEvent.mousePosition))
+            {
+                instance.OnPropClicked(property);
+                if (Event.current.button == 0 && Event.current.shift)
+                {
+                    isSelected.boolValue = !isSelected.boolValue;
+                }
+            }
+            
             var isFocused = property.FindPropertyRelative("focused");
             EditorGUI.DrawRect(indentedRect, isSelected.boolValue ? _selectedColor : _backColor );
             if (isFocused.boolValue)

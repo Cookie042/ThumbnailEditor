@@ -43,6 +43,8 @@ public partial class ThumbnailEditorWindow : EditorWindow
     private PrefabObject activeObject;
 
     private Vector2 scrollPos = Vector2.zero;
+
+    private ThumbnailPreviewWindow previewWindow;
     
     private void OnGUI()
     {
@@ -83,8 +85,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         switch (settings.AAMode)
         {
-            case PostProcessLayer.Antialiasing.None:
-                break;
+            case PostProcessLayer.Antialiasing.None: break;
             case PostProcessLayer.Antialiasing.FastApproximateAntialiasing:
                 EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("faa.fastMode"));
                 EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("faa.keepAlpha"));
@@ -108,23 +109,38 @@ public partial class ThumbnailEditorWindow : EditorWindow
             if (GUILayout.Button("Render All"))
             {
                 RenderPreviews(_prefabObjects);
+                if (previewWindow != null && activeObject != null)
+                {
+                    previewWindow.activeTexture = activeObject.thumbnail;
+                    previewWindow.Repaint();
+                }
+
             }
             if (GUILayout.Button("Render Selected"))
             {
-                List<PrefabObject> selected = 
+                List<PrefabObject> selected =
                     _prefabObjects.Where(prefabObject => prefabObject.selected).ToList();
                 RenderPreviews(selected);
+
+                if (previewWindow != null && activeObject != null)
+                {
+                    previewWindow.activeTexture = activeObject.thumbnail;
+                    previewWindow.Repaint();
+                }
             }
+        }
+        EditorGUILayout.EndHorizontal();
+        EditorGUILayout.BeginHorizontal();
+        { 
             if (GUILayout.Button("Save Json/Image Data"))
             {
-                //saving images and a json with the settings used to create it
-                foreach (PrefabObject meshObject in _prefabObjects)
-                {
-                    var jsonPath = Path.Combine(settings.path, meshObject.prefab.name + ".thumb.json");
-                    var imagePath = Path.Combine(settings.path, meshObject.prefab.name + ".png");
-                    File.WriteAllText(jsonPath, JsonUtility.ToJson(meshObject,true));
-                    File.WriteAllBytes(imagePath, meshObject.thumbnail.EncodeToPNG());
-                }
+                SaveImageData();
+            }
+            if (GUILayout.Button("Preview Active Object"))
+            {
+                previewWindow = GetWindow<ThumbnailPreviewWindow>();
+                previewWindow.activeTexture = activeObject?.thumbnail;
+
             }
         }
         EditorGUILayout.EndHorizontal();
@@ -150,11 +166,48 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
     }
 
+    private void SaveImageData()
+    {
+        var jsonDir = Path.Combine(settings.path, "ThumbData/");
+        try
+        {
+            if (!Directory.Exists(settings.path))
+                Directory.CreateDirectory(settings.path);
+            if (!Directory.Exists(jsonDir))
+                Directory.CreateDirectory(jsonDir);
+        }
+        catch (Exception e)
+        {
+            //failed to create the directory
+            Debug.LogError(e.Message);
+            //cant continue without a path to save stuff to
+            return;
+        }
+        foreach (PrefabObject meshObject in _prefabObjects)
+        {
+            //working out all the paths from the current settings
+            var jsonPath = Path.Combine(jsonDir, meshObject.prefab.name + ".thumb.json");
+            var imagePath = Path.Combine(settings.path, meshObject.prefab.name + ".png");
+
+            try
+            {
+                File.WriteAllText(jsonPath, JsonUtility.ToJson(meshObject, true));
+                File.WriteAllBytes(imagePath, meshObject.thumbnail.EncodeToPNG());
+            }
+            catch (Exception e)
+            {
+                Console.WriteLine(e.Message);
+            }
+
+        }
+    }
+
     private void HandleDragNDropEvents(SerializedObject editorWindowObject)
     {
         //Define drag and drop rectangle
         var DragDropRect = GUILayoutUtility.GetLastRect();
-        DragDropRect.height = EditorGUIUtility.singleLineHeight;
+        //EditorGUI.DrawRect(DragDropRect, new Color(1f, 0.69f, 0f, 0.2f));
+        //DragDropRect.height = EditorGUIUtility.singleLineHeight;
 
         //If the mouse is over the drag and drop area
         if (DragDropRect.Contains(Event.current.mousePosition))
@@ -176,7 +229,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
                     if (obj is GameObject go)
                     {
                         //look for the data object first in the current directory
-                        var path = Path.Combine(settings.path, go.name + ".thumb.json");
+                        var path = Path.Combine(settings.path, "/ThumbData/", go.name + ".thumb.json");
                         if (File.Exists(path))
                         {
                             var newobj = JsonUtility.FromJson<PrefabObject>(File.ReadAllText(path));
@@ -324,6 +377,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
         instance.Show();
     }
 
+    //registered to a scene update event on window initialize
     private void DrawActiveObjectScenePreview(Camera cam)
     {
         if (activeObject != null)
@@ -333,6 +387,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
     }
 
+    //does the math for converting orbit angles to a camera position and look rotation...
     private static (Vector3 pos, Quaternion rot, Vector3 forward, Vector3 target) GetCameraTransformTuple(float yaw, float pitch, float distance, float height)
     {
         //where the camera will be pointing
@@ -357,16 +412,25 @@ public partial class ThumbnailEditorWindow : EditorWindow
     //really hacky way of managing the active focused object. TODO: do better
     private void OnPropClicked(SerializedProperty pObject)
     {
+        if (Event.current.button != 1)
+            return;
+
         PrefabObject focused = null;
         foreach (PrefabObject t in _prefabObjects)
         {
             //matching based on prefab gameobject reference
-            bool equal = t.prefab == pObject.FindPropertyRelative("prefab").objectReferenceValue as GameObject;
+            bool equal = t.prefab == pObject.FindPropertyRelative("prefab").objectReferenceValue as GameObject ;
             if (equal)
                 focused = t;
+
             t.focused = equal; //sets matching to true, non to false
         }
         activeObject = focused;
+
+        if (previewWindow != null && activeObject != null)
+            previewWindow.activeTexture = activeObject.thumbnail;
+        previewWindow.Repaint();
+                
 
         Repaint(); //because we're changing the state of 'focused' on all the objects, used by the propertyDrawer
     }
