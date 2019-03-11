@@ -32,7 +32,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         public PostProcessProfile postProfile;
         public PostProcessLayer.Antialiasing AAMode;
-
+        public FastApproximateAntialiasing faa;
+        public SubpixelMorphologicalAntialiasing smaa;
+        public TemporalAntialiasing taa;
     }
     public ThumbnailEditorSettings settings;
     
@@ -41,7 +43,7 @@ public partial class ThumbnailEditorWindow : EditorWindow
     private PrefabObject activeObject;
 
     private Vector2 scrollPos = Vector2.zero;
-
+    
     private void OnGUI()
     {
         EditorGUI.BeginChangeCheck();
@@ -78,6 +80,25 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("postProfile"));
         EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("AAMode"));
+
+        switch (settings.AAMode)
+        {
+            case PostProcessLayer.Antialiasing.None:
+                break;
+            case PostProcessLayer.Antialiasing.FastApproximateAntialiasing:
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("faa.fastMode"));
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("faa.keepAlpha"));
+                break;
+            case PostProcessLayer.Antialiasing.SubpixelMorphologicalAntialiasing:
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("smaa.quality"));
+                break;
+            case PostProcessLayer.Antialiasing.TemporalAntialiasing:
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("taa.jitterSpread"));
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("taa.sharpness"));
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("taa.stationaryBlending"));
+                EditorGUILayout.PropertyField(settingsProp.FindPropertyRelative("taa.motionBlending"));
+                break;
+        }
 
         //var settingsProp = editorWindowObject.FindProperty("settings");
         //EditorGUILayout.PropertyField(settingsProp, true);
@@ -185,14 +206,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
     private void RenderPreviews(List<PrefabObject> objects)
     {
         Camera cam = GetRenderCamera();
-        cam.cullingMask = 1 << settings.renderLayer;
-        cam.fieldOfView = settings.cameraFOV;
+
+        ApplyCameraSettings();
         
-
-        if (cam.targetTexture.height != settings.thumbnailSize)
-            cam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) {antiAliasing = 8, filterMode = FilterMode.Trilinear, anisoLevel = 16};
-
-
         var DefaultRenderData = GetCameraTransformTuple(settings.orbitYaw, settings.orbitPitch, settings.orbitDistance, settings.orbitHeight);
         (Vector3 pos, Quaternion rot, Vector3 forward, Vector3 target) activeData;
 
@@ -217,11 +233,9 @@ public partial class ThumbnailEditorWindow : EditorWindow
             RecursiveDrawGameObject(mtx, po.prefab, settings.renderLayer, cam);
 
             var texture = new Texture2D(settings.thumbnailSize, settings.thumbnailSize);
-
             RenderTargetToTexture(cam, ref texture);
 
             po.thumbnail = texture;
-
             objects[moIndex] = po;
         }
     }
@@ -244,27 +258,23 @@ public partial class ThumbnailEditorWindow : EditorWindow
             //if it didnt find one set one up
             if (returnCam == null)
             {
-                var rt = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) {antiAliasing = 8};
 
                 var go = new GameObject("thumbnail Camera");
                 go.layer = settings.renderLayer;
                 returnCam = go.AddComponent<Camera>();
+                returnCam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32);
 
                 var postLayer = go.AddComponent<PostProcessLayer>();
                 postLayer.antialiasingMode = settings.AAMode;
                 postLayer.volumeLayer = 1 << settings.renderLayer;
                 var postVolume = go.AddComponent<PostProcessVolume>();
                 postVolume.isGlobal = true;
-                postVolume.profile = settings.postProfile;
 
                 returnCam.transform.position = Vector3.zero;
                 returnCam.transform.rotation = Quaternion.identity;
                 returnCam.transform.localScale = Vector3.one;
                 returnCam.clearFlags = CameraClearFlags.Color;
                 returnCam.backgroundColor = Color.clear;
-                returnCam.targetTexture = rt;
-
-                returnCam.cullingMask = settings.renderLayer;
             }
         }
 
@@ -272,6 +282,26 @@ public partial class ThumbnailEditorWindow : EditorWindow
 
         //surely we have one by now
         return returnCam;
+    }
+
+    private void ApplyCameraSettings()
+    {
+        var cam = GetRenderCamera();
+
+        if (cam.targetTexture.height != settings.thumbnailSize)
+            cam.targetTexture = new RenderTexture(settings.thumbnailSize, settings.thumbnailSize, 32) { antiAliasing = 8, filterMode = FilterMode.Trilinear, anisoLevel = 16 };
+
+        var postVolume = cam.gameObject.GetComponent<PostProcessVolume>();
+        if (postVolume != null && settings.postProfile != null)
+            postVolume.profile = settings.postProfile;
+        var postLayer = cam.gameObject.GetComponent<PostProcessLayer>();
+        if (postLayer != null )
+        {
+            postLayer.antialiasingMode = settings.AAMode;
+        }
+
+        cam.cullingMask = 1 << settings.renderLayer;
+        cam.fieldOfView = settings.cameraFOV;
     }
 
     [MenuItem("Cookie Jar/thumbnail Renderer")]
